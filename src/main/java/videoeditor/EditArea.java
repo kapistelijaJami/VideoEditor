@@ -25,17 +25,20 @@ public class EditArea extends InteractableElement {
 	private Clip selectedClip;
 	private boolean dragging = false;
 	
-	public EditArea(VideoEditor editor, HasBounds hasBounds, double videoLength, String videoName) {
+	public EditArea(VideoEditor editor, HasBounds hasBounds) {
 		super(hasBounds, false);
 		clips = new ArrayList<>();
 		
+		this.editor = editor;
+	}
+	
+	public void setVideo(double videoLength, String videoName) {
 		this.videoDuration = videoLength;
 		this.areaStart = 0;
 		this.areaEnd = videoLength;
 		this.videoName = videoName;
-		
+		clips.clear();
 		clips.add(new Clip(areaStart, areaEnd));
-		this.editor = editor;
 	}
 	
 	@Override
@@ -128,20 +131,21 @@ public class EditArea extends InteractableElement {
 		double t = (coords - getX()) / (double) getWidth();
 		return HelperFunctions.lerp(t, areaStart, areaEnd);
 	}
-
+	
 	private void renderCurrentTime(Graphics2D g) {
 		double time = editor.getCurrentTime();
 		int x = timeToCoords(time);
 		g.setColor(Color.red);
+		g.setStroke(new BasicStroke(1));
 		g.drawLine(x, getY(), x, getY() + getHeight());
 	}
-
+	
 	@Override
 	public boolean hover(int x, int y) {
 		
 		return false;
 	}
-
+	
 	@Override
 	public boolean click(int x, int y) {
 		if (getBounds().contains(x, y)) {
@@ -180,22 +184,26 @@ public class EditArea extends InteractableElement {
 			selectedClip.setDisabled(!selectedClip.isDisabled());
 		}
 	}
-
+	
 	private Clip isInsideClip(int x, int y) {
 		int clipHeight = getHeight() / 2;
 		int clipY = getY() + clipHeight / 2;
 		for (Clip clip : clips) {
-			if (isInside(coordsToTime(x), clip.getOriginalStart(), clip.getOriginalEnd()) && isInside(y, clipY, clipY + clipHeight)) {
+			if (isInsideClipTime(clip, coordsToTime(x)) && isInside(y, clipY, clipY + clipHeight)) {
 				return clip;
 			}
 		}
 		return null;
 	}
 	
+	private boolean isInsideClipTime(Clip clip, double time) {
+		return isInside(time, clip.getOriginalStart(), clip.getOriginalEnd());
+	}
+	
 	private boolean isInside(double x, double a, double b) {
 		return x >= a && x <= b;
 	}
-
+	
 	public void cut(int x, int y) {
 		selectedClip = null;
 		if (getBounds().contains(x, y)) {
@@ -219,7 +227,7 @@ public class EditArea extends InteractableElement {
 		clips.add(new Clip(time, endTime));
 		clips.sort(null);
 	}
-
+	
 	public List<Clip> getActiveClips() {
 		List<Clip> list = new ArrayList<>();
 		
@@ -230,8 +238,17 @@ public class EditArea extends InteractableElement {
 		}
 		return list;
 	}
-
+	
 	public Clip getSelectedClip() {
 		return selectedClip;
+	}
+	
+	public void cutAtTime(double time) {
+		for (Clip clip : clips) {
+			if (isInsideClipTime(clip, time)) {
+				splitClip(clip, time);
+				return;
+			}
+		}
 	}
 }

@@ -20,8 +20,8 @@ import uk.co.caprica.vlcj.player.embedded.EmbeddedMediaPlayer;
 public class Main {
     public static void main(String[] args) {
 		//Absolute path has to start with backslash (after drive letter), the rest can be either one.
-		String videoPath = "video.mp4";
-		new VideoEditor(videoPath).start();
+		new VideoEditor().start();
+		
 		
 		//test(videoPath);
 		//simpleExample(videoPath);

@@ -55,8 +55,25 @@ public class EditAreaInput implements MouseListener, MouseMotionListener, KeyLis
 
 	@Override
 	public void keyPressed(KeyEvent e) {
-		if (e.getKeyCode() == KeyEvent.VK_DELETE) {
-			editor.toggleDeleteSelected();
+		switch (e.getKeyCode()) {
+			case KeyEvent.VK_DELETE:
+				editor.toggleDeleteSelected();
+				break;
+			case KeyEvent.VK_C:
+				editor.cutCurrentTime();
+				break;
+			case KeyEvent.VK_SPACE:
+				editor.togglePause();
+				break;
+			case KeyEvent.VK_LEFT:
+				editor.skip(-5000);
+				break;
+			case KeyEvent.VK_RIGHT:
+				editor.skip(5000);
+				break;
+			case KeyEvent.VK_ESCAPE:
+				editor.stop();
+				break;
 		}
 	}
 

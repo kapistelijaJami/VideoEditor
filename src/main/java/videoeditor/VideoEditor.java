@@ -14,8 +14,12 @@ import java.awt.GridBagLayout;
 import java.awt.GridLayout;
 import java.awt.HeadlessException;
 import java.awt.Insets;
+import java.awt.KeyEventDispatcher;
+import java.awt.KeyboardFocusManager;
 import java.awt.Rectangle;
+import java.awt.datatransfer.DataFlavor;
 import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
 import java.io.File;
 import java.text.DecimalFormat;
@@ -35,6 +39,7 @@ import javax.swing.JSplitPane;
 import javax.swing.JTextPane;
 import javax.swing.LookAndFeel;
 import javax.swing.SwingConstants;
+import javax.swing.TransferHandler;
 import javax.swing.UIManager;
 import javax.swing.UnsupportedLookAndFeelException;
 import javax.swing.border.BevelBorder;
@@ -46,9 +51,12 @@ import processes.StreamGobblerText;
 import timer.DurationFormat;
 import timer.Timer;
 import uilibrary.Canvas;
+import uilibrary.DragAndDrop;
 import uilibrary.GameLoop;
 import uilibrary.Window;
+import uilibrary.arrangement.Margin;
 import uilibrary.enums.Alignment;
+import uilibrary.util.RenderMultilineText;
 import uilibrary.util.RenderText;
 import uk.co.caprica.vlcj.media.Meta;
 import uk.co.caprica.vlcj.player.base.MediaPlayer;
@@ -72,12 +80,14 @@ public class VideoEditor extends GameLoop {
 	private final Timer timer;
 	private double videoDuration;
 	
-	public VideoEditor(String videoPath) {
+	private boolean exporting = false;
+	
+	public VideoEditor() {
 		super(60);
 		
-		this.videoPath = videoPath;
 		window = new Window(1280, 900, false, "Video Editor");
 		timer = new Timer(Timer.Type.MILLIS);
+		timer.pause();
 	}
 	
 	@Override
@@ -85,16 +95,38 @@ public class VideoEditor extends GameLoop {
 		mediaPlayerComponent = new EmbeddedMediaPlayerComponent();
 		
 		createUI();
+		editArea = new EditArea(this, editorCanvas);
+		
+		
+		EditAreaInput input = new EditAreaInput(this);
+		editorCanvas.addMouseListener(input);
+		editorCanvas.addMouseMotionListener(input);
+		//editorCanvas.addKeyListener(input);
+		
+		
+		KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher((KeyEvent e) -> { //dispatches key events
+			if (e.getID() == KeyEvent.KEY_PRESSED) {
+				input.keyPressed(e);
+			}
+			return false; // Return false to allow further event processing
+		});
+		
+		window.setTransferHandler(new DragAndDrop(this::loadVideo));
+	}
+	
+	public boolean loadVideo(List<File> files) {
+		this.videoPath = files.get(0).getAbsolutePath();
 		
 		EmbeddedMediaPlayer player = mediaPlayerComponent.mediaPlayer();
 		player.media().startPaused(videoPath); //Waits for the video to load, so we can access the metadata and set up the editor.
+		
+		insertVideoItemToEditor();
 		
 		togglePause();
 		timer.start();
 		
 		window.setOnClosingFunction(() -> mediaPlayerComponent.release());
 		
-		insertVideoItemToEditor();
 		
 		player.controls().setRepeat(true);
 		
@@ -134,10 +166,7 @@ public class VideoEditor extends GameLoop {
 			}
 		});
 		
-		EditAreaInput input = new EditAreaInput(this);
-		editorCanvas.addMouseListener(input);
-		editorCanvas.addMouseMotionListener(input);
-		editorCanvas.addKeyListener(input);
+		return true;
 	}
 	
 	@Override
@@ -164,6 +193,19 @@ public class VideoEditor extends GameLoop {
 		Graphics2D g = window.getGraphics2D(editorCanvas);
 		
 		editArea.render(g);
+		
+		if (exporting) {
+			String text = "Exporting the video! Please wait...";
+			Rectangle bounds = RenderMultilineText.getRenderedBounds(g, text, null, editArea.getBounds());
+			new Margin(15, 10).widenRectWithMargin(bounds);
+			
+			g.setColor(new Color(150, 0, 0));
+			g.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+			
+			g.setColor(Color.black);
+			RenderText.drawStringWithAlignment(g, text, editArea.getBounds(), null);
+		}
+		
 		window.display(g, editorCanvas);
 	}
 	
@@ -188,8 +230,9 @@ public class VideoEditor extends GameLoop {
 		controlsPane.setMinimumSize(new Dimension(200, 50));
 		controlsPane.setPreferredSize(new Dimension(200, 50));
 		
-		JPanel buttonsPane = new JPanel(new GridLayout(1, 0, 10, 0));
+		JPanel buttonsPane = new JPanel(new GridLayout(1, 0, 5, 0));
 		pauseButton = new JButton("Pause");
+		pauseButton.setPreferredSize(new Dimension(70, 50));
 		buttonsPane.add(pauseButton);
 		JButton rewindFullButton = new JButton("<<<");
 		buttonsPane.add(rewindFullButton);
@@ -267,12 +310,13 @@ public class VideoEditor extends GameLoop {
 			toggleDeleteSelected();
 		});
 		
-		exportButton.addActionListener((ActionEvent e) -> export());
+		exportButton.addActionListener((ActionEvent e) -> new Thread(() -> export()).start());
 	}
 	
 	private void insertVideoItemToEditor() {
 		videoDuration = mediaPlayerComponent.mediaPlayer().status().length();
-		editArea = new EditArea(this, editorCanvas, videoDuration, new File(videoPath).getName());
+		editArea.setVideo(videoDuration, new File(videoPath).getName());
+		
 		//mediaPlayerComponent.mediaPlayer().media().meta().asMetaData().get(Meta.TITLE)
 	}
 	
@@ -318,11 +362,6 @@ public class VideoEditor extends GameLoop {
 	public void skipTo(long time) {
 		timer.startPaused(time);
 		mediaPlayerComponent.mediaPlayer().controls().setTime(time);
-		
-		if (!mediaPlayerComponent.mediaPlayer().status().isPlaying()) {
-			mediaPlayerComponent.mediaPlayer().controls().play();
-			mediaPlayerComponent.mediaPlayer().controls().pause();
-		}
 	}
 	
 	public void editAreaMouseClicked(MouseEvent e) {
@@ -359,12 +398,36 @@ public class VideoEditor extends GameLoop {
 					return;
 				}
 				
+				String[] choices = {"Very fast export without re-encode", "Slow export with re-encode"};
+				
+				int choice = JOptionPane.showOptionDialog(
+					null,
+					"Choose an encoding option. Very fast might have freezes at the starts of segments. While slow export will not.",
+					"Encoding Options",
+					JOptionPane.YES_NO_OPTION,
+					JOptionPane.QUESTION_MESSAGE,
+					null,
+					choices,
+					choices[0]
+				);
+				
+				boolean speed;
+				if (choice == 0) { //speed
+					speed = true;
+				} else if (choice == 1) { //slow
+					speed = false;
+				} else {
+					return;
+				}
+				
+				exporting = true;
+				
 				//make temp dir
 				new File("temp").mkdir();
 				
 				List<Clip> clips = editArea.getActiveClips();
 				
-				String command = buildExportCommand(clips);
+				String command = buildExportCommand1(clips, speed);
 				//System.out.println("command = " + command);
 				//command = "ffmpeg -i G:\\Lataukset\\Sarjat\\Foundation\\Foundation.2021.S02.720p\\Foundation.S02E01.In.Seldons.Shadow.720p.ATVP.WEB-DL.DDP5.1.H.264-CasStudio.mkv -ss 00:00:00 -t 00:01:00 -c copy -avoid_negative_ts make_zero segment1.mp4 -ss 00:02:30 -t 00:01:30 -c copy -avoid_negative_ts make_zero segment2.mp4 -ss 00:04:30 -t 68 -c copy -avoid_negative_ts make_zero segment3.mp4";
 				System.out.println("Command 1: " + command);
@@ -387,6 +450,7 @@ public class VideoEditor extends GameLoop {
 				//remove temp dir
 				deleteWholeFolder("temp");
 				
+				exporting = false;
 				
 			} else {
 				JOptionPane.showMessageDialog(
@@ -496,8 +560,8 @@ public class VideoEditor extends GameLoop {
 	public Tool getCurrentTool() {
 		return currentTool;
 	}
-
-	private String buildExportCommand(List<Clip> clips) {
+	
+	private String buildExportCommand1(List<Clip> clips, boolean speed) {
 		String command = "ffmpeg -i " + addQuotes(videoPath);
 		
 		DecimalFormat df = new DecimalFormat("0.000", new DecimalFormatSymbols(Locale.US));
@@ -507,7 +571,16 @@ public class VideoEditor extends GameLoop {
 			String start = df.format(clip.getOriginalStart() / 1000);
 			String dur = df.format((clip.getOriginalEnd() - clip.getOriginalStart()) / 1000);
 			
-			command += " -ss " + start + " -t " + dur + " -c copy -avoid_negative_ts make_zero temp/segment" + i + ".mp4";
+			
+			if (speed) {
+				//command += " -ss " + start + " -t " + dur + " -c copy -avoid_negative_ts make_zero temp/segment" + i + ".mp4"; //Seems to have big freeze at the start
+				command += " -ss " + start + " -t " + dur + " -c copy -copyts temp/segment" + i + ".mp4"; //might be smaller freeze, but the first 2 commands are very fast
+			} else {
+				//command += " -ss " + start + " -t " + dur + " -c:v libx264 -c:a copy temp/segment" + i + ".mp4";
+				command += " -ss " + start + " -t " + dur + " -c:v libx264 -crf 18 -c:a copy temp/segment" + i + ".mp4"; //doesn't have freeze, but is a re-encode, slow.
+			}
+			
+			//command += " -ss " + start + " -t " + dur + " -c:v libx264 -crf 18 -tune film -profile:v high -c:a copy temp/segment" + i + ".mp4"; //re-encode, not sure about quality
 		}
 		
 		//Will look like this: "ffmpeg -i " + addQuotes(videoPath) + " -ss 00:00:00 -t 00:01:00 -c copy -avoid_negative_ts make_zero temp/segment1.mp4 -ss 00:02:30 -t 00:01:30 -c copy -avoid_negative_ts make_zero temp/segment2.mp4 -ss 00:04:30 -c copy -avoid_negative_ts make_zero temp/segment3.mp4";
@@ -555,5 +628,9 @@ public class VideoEditor extends GameLoop {
 	
 	private void nextFrame() {
 		mediaPlayerComponent.mediaPlayer().controls().nextFrame();
+	}
+
+	public void cutCurrentTime() {
+		editArea.cutAtTime(getCurrentTime());
 	}
 }
