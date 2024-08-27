@@ -601,7 +601,7 @@ public class VideoEditor extends GameLoop {
 			command += " file '" + file.getAbsolutePath() + "'";
 		}
 		
-		command += ") | ffmpeg -protocol_whitelist file,pipe -f concat -safe 0 -i pipe:0 -c copy " + filePath;
+		command += ") | ffmpeg -protocol_whitelist file,pipe -f concat -safe 0 -i pipe:0 -c copy \"" + filePath + "\"";
 		
 		//Will look like this (but with absolute paths) (cmd version): "(echo" + " file 'temp/segment1.mp4'" + " & echo file 'temp/segment2.mp4'" + " & echo file 'temp/segment3.mp4')" + " | ffmpeg -protocol_whitelist file,pipe -f concat -safe 0 -i pipe:0 -c copy output_combined.mp4";
 		
